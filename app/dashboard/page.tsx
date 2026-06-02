@@ -216,11 +216,27 @@ export default function DashboardPage() {
       setBillPayer(session.user.id);
 
       // Get profile
-      const { data: profileData } = await supabase
+      let { data: profileData, error: profileErr } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", session.user.id)
         .single();
+      
+      if (profileErr || !profileData) {
+        // Tự động tạo profile nếu trigger phía database không chạy
+        const { data: insertedProfile, error: insertErr } = await supabase
+          .from("profiles")
+          .insert({
+            id: session.user.id,
+            display_name: session.user.user_metadata?.display_name || session.user.email?.split("@")[0] || "Thành viên",
+          })
+          .select()
+          .single();
+        
+        if (!insertErr && insertedProfile) {
+          profileData = insertedProfile;
+        }
+      }
       
       setProfile(profileData);
 
