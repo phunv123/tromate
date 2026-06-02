@@ -1,11 +1,24 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const sanitizeEnv = (val: string | undefined): string => {
+  if (!val) return "";
+  let clean = val.trim();
+  // Remove surrounding quotes if they exist
+  if (
+    (clean.startsWith('"') && clean.endsWith('"')) ||
+    (clean.startsWith("'") && clean.endsWith("'"))
+  ) {
+    clean = clean.slice(1, -1).trim();
+  }
+  return clean;
+};
+
+const supabaseUrl = sanitizeEnv(process.env.NEXT_PUBLIC_SUPABASE_URL);
+const supabaseAnonKey = sanitizeEnv(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn(
-    "Supabase URL hoặc Anon Key chưa được cấu hình trong file .env.local"
+    "Supabase URL hoặc Anon Key chưa được cấu hình"
   );
 }
 
