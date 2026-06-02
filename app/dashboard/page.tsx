@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 interface Profile {
@@ -2191,10 +2192,4 @@ Chi tiết chi phí:
   );
 }
 
-function Link({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
-  return (
-    <a href={href} className={className}>
-      {children}
-    </a>
-  );
-}
+
