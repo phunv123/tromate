@@ -519,7 +519,10 @@ export default function DashboardPage() {
         .single();
 
       if (findErr || !targetRoom) {
-        setActionError("Mã mời không chính xác hoặc phòng không tồn tại!");
+        console.error("Lỗi tìm phòng:", findErr);
+        setActionError(
+          `Mã mời không chính xác hoặc phòng không tồn tại! Chi tiết: ${findErr?.message || "Không tìm thấy dữ liệu"} (Mã: ${findErr?.code || "N/A"})`
+        );
         return;
       }
 
@@ -528,10 +531,13 @@ export default function DashboardPage() {
         .insert({ room_id: targetRoom.id, user_id: user.id });
 
       if (joinErr) {
+        console.error("Lỗi tham gia phòng:", joinErr);
         if (joinErr.code === "23505") {
           setActionError("Bạn đã ở trong phòng này rồi!");
         } else {
-          throw joinErr;
+          setActionError(
+            `Không thể tham gia phòng: ${joinErr.message} (Mã: ${joinErr.code || "N/A"})`
+          );
         }
         return;
       }
@@ -540,7 +546,8 @@ export default function DashboardPage() {
       setInviteCode("");
       if (profile) await loadRoomData(profile.id);
     } catch (err: any) {
-      setActionError(err.message || "Lỗi tham gia phòng.");
+      console.error("Lỗi ngoại lệ khi tham gia phòng:", err);
+      setActionError(`Lỗi hệ thống: ${err.message || "Lỗi không xác định"}`);
     }
   };
 
