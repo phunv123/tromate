@@ -512,10 +512,11 @@ export default function DashboardPage() {
     setActionError("");
 
     try {
+      const codeClean = inviteCode.trim();
       const { data: targetRoom, error: findErr } = await supabase
         .from("rooms")
         .select("*")
-        .eq("invite_code", inviteCode.trim().toUpperCase())
+        .or(`invite_code.eq.${codeClean.toUpperCase()},invite_code.eq.${codeClean.toLowerCase()}`)
         .single();
 
       if (findErr || !targetRoom) {
