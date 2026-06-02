@@ -9,10 +9,9 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
 
-  // LƯU Ý: Nếu bạn deploy lên GitHub Pages dạng `tài-khoản.github.io/tromate` (chạy trên subfolder):
-  // Bạn hãy mở 2 dòng dưới ra và sửa '/tromate' thành tên repository của bạn trên GitHub:
-  // basePath: '/tromate',
-  // assetPrefix: '/tromate',
+  // Cấu hình đường dẫn subfolder cho GitHub Pages
+  basePath: "/tromate",
+  assetPrefix: "/tromate",
 };
 
 export default nextConfig;
