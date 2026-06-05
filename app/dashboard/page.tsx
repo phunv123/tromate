@@ -47,6 +47,16 @@ interface Purchase {
   bought_at: string;
 }
 
+interface ActivityLog {
+  id: string;
+  room_id: string;
+  user_id: string;
+  action_type: "create" | "update_status" | "edit_item" | "delete" | "buy";
+  item_name: string;
+  details: string;
+  created_at: string;
+}
+
 // ─── Constants ──────────────────────────────────────────────
 const STATUS_CONFIG = {
   in_stock: { label: "Còn hàng", color: "bg-emerald-500", textColor: "text-emerald-700", bgLight: "bg-emerald-50", borderColor: "border-emerald-200" },
@@ -131,6 +141,10 @@ export default function DashboardPage() {
   const [editRotationOrder, setEditRotationOrder] = useState<string[]>([]);
   const [editCurrentTurnIdx, setEditCurrentTurnIdx] = useState(0);
 
+  // Activity logs states
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [historySubTab, setHistorySubTab] = useState<"purchases" | "activities">("purchases");
+
   // New item form
   const [newName, setNewName] = useState("");
   const [newEmoji, setNewEmoji] = useState("📦");
@@ -184,7 +198,27 @@ export default function DashboardPage() {
       .from("shared_item_purchases").select("*").eq("room_id", membership.room_id)
       .order("bought_at", { ascending: false }).limit(100);
     setPurchases((purchaseList as any) || []);
+
+    const { data: logList } = await supabase
+      .from("room_activity_logs").select("*").eq("room_id", membership.room_id)
+      .order("created_at", { ascending: false }).limit(100);
+    setActivityLogs((logList as any) || []);
   }, []);
+
+  const logActivity = async (actionType: "create" | "update_status" | "edit_item" | "delete" | "buy", itemName: string, details: string) => {
+    if (!room || !user) return;
+    try {
+      await supabase.from("room_activity_logs").insert({
+        room_id: room.id,
+        user_id: user.id,
+        action_type: actionType,
+        item_name: itemName,
+        details: details,
+      });
+    } catch (err) {
+      console.error("Failed to log activity:", err);
+    }
+  };
 
   // ─── Room Actions ───────────────────────────────────────
   const handleCreateRoom = async (e: React.FormEvent) => {
@@ -240,6 +274,9 @@ export default function DashboardPage() {
         current_turn: 0,
       });
       if (error) throw error;
+      
+      await logActivity("create", newName.trim(), `đã thêm sản phẩm "${newName.trim()}"`);
+      
       setActionSuccess(`Đã thêm "${newName}" vào danh sách!`);
       setNewName("");
       setNewEmoji("📦");
@@ -251,6 +288,14 @@ export default function DashboardPage() {
   const handleUpdateStatus = async (item: SharedItem, newStatus: "in_stock" | "low" | "out_of_stock") => {
     try {
       await supabase.from("shared_items").update({ status: newStatus }).eq("id", item.id);
+      
+      let statusLabel = "";
+      if (newStatus === "in_stock") statusLabel = "Còn hàng";
+      else if (newStatus === "low") statusLabel = "Sắp hết";
+      else if (newStatus === "out_of_stock") statusLabel = "Hết rồi";
+      
+      await logActivity("update_status", item.name, `đã báo [${statusLabel}] cho sản phẩm "${item.name}"`);
+
       if (profile) await loadRoom(profile.id);
     } catch (err: any) { setActionError(err.message); }
   };
@@ -275,6 +320,8 @@ export default function DashboardPage() {
         current_turn: nextTurn,
       }).eq("id", item.id);
 
+      await logActivity("buy", item.name, `đã xác nhận mua "${item.name}"` + (buyPrice ? ` với giá ${formatVND(Number(buyPrice))}` : ""));
+
       setActionSuccess(`Đã ghi nhận bạn mua "${item.name}"! Lượt tiếp đã xoay.`);
       setShowBuyModal(null);
       setBuyPrice("");
@@ -283,9 +330,12 @@ export default function DashboardPage() {
   };
 
   const handleDeleteItem = async (itemId: string) => {
-    if (!confirm("Bạn có chắc muốn xoá sản phẩm này?")) return;
+    const item = items.find((it) => it.id === itemId);
+    if (!item) return;
+    if (!confirm(`Bạn có chắc muốn xoá sản phẩm "${item.name}"?`)) return;
     try {
       await supabase.from("shared_items").delete().eq("id", itemId);
+      await logActivity("delete", item.name, `đã xoá sản phẩm "${item.name}"`);
       if (profile) await loadRoom(profile.id);
     } catch (err: any) { setActionError(err.message); }
   };
@@ -354,6 +404,24 @@ export default function DashboardPage() {
     if (!showEditModal) return;
     try {
       setActionError("");
+      
+      const changes = [];
+      if (showEditModal.name !== editName.trim()) changes.push(`đổi tên thành "${editName.trim()}"`);
+      if (showEditModal.emoji !== editEmoji) changes.push(`đổi emoji thành ${editEmoji}`);
+      
+      const prevNextBuyer = showEditModal.rotation_order[showEditModal.current_turn];
+      const newNextBuyer = editRotationOrder[editCurrentTurnIdx];
+      if (prevNextBuyer !== newNextBuyer && newNextBuyer) {
+        changes.push(`chuyển lượt tiếp cho ${getMemberName(newNextBuyer)}`);
+      }
+      
+      const orderChanged = JSON.stringify(showEditModal.rotation_order) !== JSON.stringify(editRotationOrder);
+      if (orderChanged) {
+        changes.push("cập nhật lại vòng xoay");
+      }
+
+      const details = changes.length > 0 ? `đã chỉnh sửa sản phẩm: ${changes.join(", ")}` : `đã chỉnh sửa sản phẩm`;
+
       const { error } = await supabase.from("shared_items").update({
         name: editName.trim(),
         emoji: editEmoji,
@@ -362,6 +430,9 @@ export default function DashboardPage() {
       }).eq("id", showEditModal.id);
 
       if (error) throw error;
+
+      await logActivity("edit_item", editName.trim(), details);
+
       setActionSuccess(`Đã cập nhật sản phẩm "${editName}"!`);
       setShowEditModal(null);
       if (profile) await loadRoom(profile.id);
@@ -690,37 +761,99 @@ export default function DashboardPage() {
         {/* ══════════ TAB 2: HISTORY ══════════ */}
         {activeTab === "history" && (
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-gray-900 mb-5">📜 Lịch sử mua sắm</h3>
-            {purchases.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-4xl mb-3">🛒</p>
-                <p className="text-gray-400">Chưa có ai mua gì cả. Hãy bắt đầu!</p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-4 mb-5">
+              <h3 className="text-lg font-bold text-gray-900">📜 Lịch sử phòng trọ</h3>
+              {/* Sub tabs */}
+              <div className="flex rounded-lg bg-gray-100 p-0.5 self-start sm:self-auto">
+                <button onClick={() => setHistorySubTab("purchases")} className={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${historySubTab === "purchases" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  🛒 Hoá đơn mua sắm
+                </button>
+                <button onClick={() => setHistorySubTab("activities")} className={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${historySubTab === "activities" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  ⚡ Nhật ký thao tác
+                </button>
               </div>
+            </div>
+
+            {historySubTab === "purchases" ? (
+              purchases.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-4xl mb-3">🛒</p>
+                  <p className="text-gray-400">Chưa có ai mua gì cả. Hãy bắt đầu!</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {purchases.map((p) => {
+                    const item = items.find((it) => it.id === p.item_id);
+                    return (
+                      <div key={p.id} className="flex items-center gap-4 rounded-xl bg-gray-50 px-4 py-3 hover:bg-gray-100 transition-colors">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${getGradientForEmoji(item?.emoji || "📦")} text-lg flex-shrink-0`}>
+                          {item?.emoji || "📦"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 truncate">
+                            <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarColor(p.buyer_id)} text-[9px] font-bold text-white mr-1.5`}>
+                              {getMemberName(p.buyer_id).charAt(0).toUpperCase()}
+                            </span>
+                            {getMemberName(p.buyer_id)} mua {item?.name || "Sản phẩm"}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-0.5">{timeAgo(p.bought_at)}</p>
+                        </div>
+                        {p.price > 0 && (
+                          <span className="text-sm font-bold text-emerald-600 flex-shrink-0">{formatVND(p.price)}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )
             ) : (
-              <div className="space-y-3">
-                {purchases.map((p) => {
-                  const item = items.find((it) => it.id === p.item_id);
-                  return (
-                    <div key={p.id} className="flex items-center gap-4 rounded-xl bg-gray-50 px-4 py-3 hover:bg-gray-100 transition-colors">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${getGradientForEmoji(item?.emoji || "📦")} text-lg flex-shrink-0`}>
-                        {item?.emoji || "📦"}
+              activityLogs.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-4xl mb-3">⚡</p>
+                  <p className="text-gray-400">Chưa có nhật ký thao tác nào.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                  {activityLogs.map((log) => {
+                    let actionIcon = "📝";
+                    let actionBg = "from-gray-100 to-gray-200";
+                    if (log.action_type === "create") {
+                      actionIcon = "➕";
+                      actionBg = "from-emerald-100 to-teal-100";
+                    } else if (log.action_type === "update_status") {
+                      actionIcon = "🔔";
+                      actionBg = "from-amber-100 to-orange-100";
+                    } else if (log.action_type === "edit_item") {
+                      actionIcon = "⚙️";
+                      actionBg = "from-blue-100 to-indigo-100";
+                    } else if (log.action_type === "delete") {
+                      actionIcon = "🗑️";
+                      actionBg = "from-rose-100 to-red-100";
+                    } else if (log.action_type === "buy") {
+                      actionIcon = "✅";
+                      actionBg = "from-green-100 to-emerald-100";
+                    }
+
+                    return (
+                      <div key={log.id} className="flex items-center gap-4 rounded-xl bg-gray-50 px-4 py-3 hover:bg-gray-100 transition-colors">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${actionBg} text-lg flex-shrink-0`}>
+                          {actionIcon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 leading-relaxed">
+                            <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarColor(log.user_id)} text-[9px] font-bold text-white mr-1.5`}>
+                              {getMemberName(log.user_id).charAt(0).toUpperCase()}
+                            </span>
+                            <span className="font-bold text-gray-950">{getMemberName(log.user_id)}</span>
+                            {" "}{log.details}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-0.5">{timeAgo(log.created_at)}</p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 truncate">
-                          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarColor(p.buyer_id)} text-[9px] font-bold text-white mr-1.5`}>
-                            {getMemberName(p.buyer_id).charAt(0).toUpperCase()}
-                          </span>
-                          {getMemberName(p.buyer_id)} mua {item?.name || "Sản phẩm"}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{timeAgo(p.bought_at)}</p>
-                      </div>
-                      {p.price > 0 && (
-                        <span className="text-sm font-bold text-emerald-600 flex-shrink-0">{formatVND(p.price)}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )
             )}
           </div>
         )}
