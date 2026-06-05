@@ -124,6 +124,13 @@ export default function DashboardPage() {
   const [showBuyModal, setShowBuyModal] = useState<SharedItem | null>(null);
   const [buyPrice, setBuyPrice] = useState("");
 
+  // Edit item states
+  const [showEditModal, setShowEditModal] = useState<SharedItem | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmoji, setEditEmoji] = useState("📦");
+  const [editRotationOrder, setEditRotationOrder] = useState<string[]>([]);
+  const [editCurrentTurnIdx, setEditCurrentTurnIdx] = useState(0);
+
   // New item form
   const [newName, setNewName] = useState("");
   const [newEmoji, setNewEmoji] = useState("📦");
@@ -281,6 +288,86 @@ export default function DashboardPage() {
       await supabase.from("shared_items").delete().eq("id", itemId);
       if (profile) await loadRoom(profile.id);
     } catch (err: any) { setActionError(err.message); }
+  };
+
+  const handleOpenEditModal = (item: SharedItem) => {
+    setShowEditModal(item);
+    setEditName(item.name);
+    setEditEmoji(item.emoji);
+    setEditRotationOrder(item.rotation_order || []);
+    setEditCurrentTurnIdx(item.current_turn);
+  };
+
+  const handleToggleMember = (userId: string) => {
+    const activeBuyerId = editRotationOrder[editCurrentTurnIdx];
+    let newOrder = [...editRotationOrder];
+    if (newOrder.includes(userId)) {
+      newOrder = newOrder.filter((id) => id !== userId);
+    } else {
+      newOrder.push(userId);
+    }
+    setEditRotationOrder(newOrder);
+
+    if (newOrder.length === 0) {
+      setEditCurrentTurnIdx(0);
+    } else {
+      const nextIdx = newOrder.indexOf(activeBuyerId);
+      setEditCurrentTurnIdx(nextIdx !== -1 ? nextIdx : 0);
+    }
+  };
+
+  const handleMoveUp = (index: number) => {
+    if (index === 0) return;
+    const activeBuyerId = editRotationOrder[editCurrentTurnIdx];
+    const newOrder = [...editRotationOrder];
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[index - 1];
+    newOrder[index - 1] = temp;
+    setEditRotationOrder(newOrder);
+
+    const nextIdx = newOrder.indexOf(activeBuyerId);
+    setEditCurrentTurnIdx(nextIdx !== -1 ? nextIdx : 0);
+  };
+
+  const handleMoveDown = (index: number) => {
+    if (index === editRotationOrder.length - 1) return;
+    const activeBuyerId = editRotationOrder[editCurrentTurnIdx];
+    const newOrder = [...editRotationOrder];
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[index + 1];
+    newOrder[index + 1] = temp;
+    setEditRotationOrder(newOrder);
+
+    const nextIdx = newOrder.indexOf(activeBuyerId);
+    setEditCurrentTurnIdx(nextIdx !== -1 ? nextIdx : 0);
+  };
+
+  const handleSetNextTurn = (userId: string) => {
+    const idx = editRotationOrder.indexOf(userId);
+    if (idx !== -1) {
+      setEditCurrentTurnIdx(idx);
+    }
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!showEditModal) return;
+    try {
+      setActionError("");
+      const { error } = await supabase.from("shared_items").update({
+        name: editName.trim(),
+        emoji: editEmoji,
+        rotation_order: editRotationOrder,
+        current_turn: editCurrentTurnIdx,
+      }).eq("id", showEditModal.id);
+
+      if (error) throw error;
+      setActionSuccess(`Đã cập nhật sản phẩm "${editName}"!`);
+      setShowEditModal(null);
+      if (profile) await loadRoom(profile.id);
+    } catch (err: any) {
+      setActionError(err.message || "Lỗi cập nhật sản phẩm.");
+    }
   };
 
   // ─── Helpers ────────────────────────────────────────────
@@ -505,8 +592,11 @@ export default function DashboardPage() {
 
                 return (
                   <div key={item.id} className={`group relative rounded-2xl border-2 bg-white p-5 shadow-sm transition-all hover:shadow-lg ${isUrgent ? "border-rose-300 animate-pulse" : isLow ? "border-amber-200" : "border-gray-200 hover:border-emerald-200"}`}>
-                    {/* Delete */}
-                    <button onClick={() => handleDeleteItem(item.id)} className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-rose-500 text-sm" title="Xoá sản phẩm">✕</button>
+                    {/* Actions */}
+                    <div className="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => handleOpenEditModal(item)} className="text-gray-400 hover:text-emerald-600 text-sm" title="Sửa sản phẩm">✏️</button>
+                      <button onClick={() => handleDeleteItem(item.id)} className="text-gray-400 hover:text-rose-500 text-sm" title="Xoá sản phẩm">✕</button>
+                    </div>
 
                     {/* Product Icon */}
                     <div className="flex items-start gap-4">
@@ -734,6 +824,116 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Edit Item Modal */}
+      {showEditModal && (() => {
+        const activeMemberIds = editRotationOrder;
+        const inactiveMembers = members.filter((m) => !activeMemberIds.includes(m.user_id));
+        const sortedEditMembers = [
+          ...activeMemberIds.map((uid) => members.find((m) => m.user_id === uid)).filter(Boolean) as Member[],
+          ...inactiveMembers,
+        ];
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5" onClick={() => setShowEditModal(null)}>
+            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl overflow-y-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4">
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  ⚙️ Chỉnh sửa sản phẩm
+                </h3>
+                <button onClick={() => setShowEditModal(null)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} className="space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Tên sản phẩm</label>
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Ví dụ: Nước mắm Nam Ngư" className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none" required />
+                </div>
+
+                {/* Emoji */}
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Chọn biểu tượng</label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {PRODUCT_PRESETS.map((p) => (
+                      <button key={p.emoji + p.name} type="button" onClick={() => { setEditEmoji(p.emoji); if (!editName) setEditName(p.name); }}
+                        className={`flex flex-col items-center gap-1 rounded-xl border-2 p-2.5 transition-all ${editEmoji === p.emoji ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:border-gray-300"}`}>
+                        <span className="text-2xl">{p.emoji}</span>
+                        <span className="text-[9px] text-gray-500">{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Rotation Order */}
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Vòng xoay lượt mua</label>
+                  <p className="text-xs text-gray-400 mb-3">Tích chọn thành viên tham gia, bấm mũi tên để sắp xếp thứ tự đi mua, chọn 🎯 để đặt làm người đi mua lượt kế tiếp.</p>
+                  
+                  <div className="rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100 max-h-60 overflow-y-auto">
+                    {sortedEditMembers.map((member) => {
+                      const uid = member.user_id;
+                      const name = member.profiles.display_name;
+                      const isActive = editRotationOrder.includes(uid);
+                      const idxInRotation = editRotationOrder.indexOf(uid);
+                      const isCurrentTurn = isActive && idxInRotation === editCurrentTurnIdx;
+                      
+                      return (
+                        <div key={uid} className={`flex items-center justify-between p-3 transition-colors ${isActive ? "bg-white" : "bg-gray-50/50"}`}>
+                          {/* Left: Checkbox + Name */}
+                          <div className="flex items-center gap-2.5">
+                            <input type="checkbox" id={`checkbox-${uid}`} checked={isActive} onChange={() => handleToggleMember(uid)} className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer" />
+                            <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white bg-gradient-to-br ${getAvatarColor(uid)}`}>
+                              {name.charAt(0).toUpperCase()}
+                            </span>
+                            <label htmlFor={`checkbox-${uid}`} className={`text-sm cursor-pointer select-none ${isActive ? "font-semibold text-gray-800" : "text-gray-400"}`}>
+                              {name}
+                            </label>
+                          </div>
+
+                          {/* Right: Actions */}
+                          {isActive && (
+                            <div className="flex items-center gap-2">
+                              {/* Turn Target Button */}
+                              <button type="button" onClick={() => handleSetNextTurn(uid)} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold transition-all border ${isCurrentTurn ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-white border-gray-200 text-gray-500 hover:border-emerald-300 hover:text-emerald-600"}`} title={isCurrentTurn ? "Đang đến lượt" : "Đặt làm người mua tiếp theo"}>
+                                <span>🎯</span>
+                                <span>{isCurrentTurn ? "Đang đến lượt" : "Lượt tiếp"}</span>
+                              </button>
+
+                              {/* Reorder Arrows */}
+                              <div className="flex items-center gap-0.5">
+                                <button type="button" onClick={() => handleMoveUp(idxInRotation)} disabled={idxInRotation === 0} className={`p-1 rounded text-gray-400 hover:bg-gray-100 disabled:opacity-30 disabled:pointer-events-none`} title="Di chuyển lên">
+                                  ▲
+                                </button>
+                                <button type="button" onClick={() => handleMoveDown(idxInRotation)} disabled={idxInRotation === editRotationOrder.length - 1} className={`p-1 rounded text-gray-400 hover:bg-gray-100 disabled:opacity-30 disabled:pointer-events-none`} title="Di chuyển xuống">
+                                  ▼
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {editRotationOrder.length === 0 && (
+                    <p className="mt-2 text-xs font-semibold text-rose-500">⚠️ Vòng xoay phải có ít nhất 1 thành viên tham gia!</p>
+                  )}
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-3 pt-3 border-t border-gray-100">
+                  <button type="button" onClick={() => setShowEditModal(null)} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+                    Huỷ
+                  </button>
+                  <button type="submit" disabled={editRotationOrder.length === 0} className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm transition-all">
+                    Lưu thay đổi
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
